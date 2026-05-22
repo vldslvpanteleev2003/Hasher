@@ -1,0 +1,144 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+      Name="Hasher"
+      Manufacturer="V Pan"
+      Version="1.0.0"
+      UpgradeCode="12A4ED86-F061-4D9A-9247-28411853DFFD"
+      Scope="perMachine"
+      InstallerVersion="500">
+
+	<Icon
+        Id="AppIcon"
+        SourceFile="icon.ico" />
+
+    <Property
+        Id="ARPPRODUCTICON"
+        Value="AppIcon" />
+		
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER"
+                 Name="Hasher" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature"
+             Title="Hasher"
+             Level="1">
+
+      <ComponentGroupRef Id="ProductComponents" />
+
+    </Feature>
+
+  </Package>
+
+
+
+  <Fragment>
+
+    <ComponentGroup Id="ProductComponents"
+                    Directory="INSTALLFOLDER">
+
+      <Component Id="HasherEXE"
+                 Guid="*"
+                 Bitness="always64">
+
+        <File
+            Id="HasherFile"
+            Source="Hasher.exe"
+            KeyPath="yes" />
+		
+		<RegistryKey 
+			Root="HKLM"
+			Key="Software\Classes\*\shell\Hasher">
+			
+			<RegistryValue 
+				Type="string"
+				Name="MUIVerb"
+				Value="Hasher" />
+				
+			<RegistryValue
+              Type="string"
+              Name="ExtendedSubCommandsKey"
+              Value="HasherMenu" />
+			  
+			<RegistryValue
+				Name="Icon"
+				Value="[INSTALLFOLDER]Hasher.exe" />
+			  
+		</RegistryKey>
+		
+		<RegistryKey
+            Root="HKLM"
+            Key="Software\Classes\HasherMenu\Shell\sha256">
+
+          <RegistryValue
+              Type="string"
+              Name="MUIVerb"
+              Value="Copy SHA256" />
+
+        </RegistryKey>
+
+        <RegistryKey
+            Root="HKLM"
+            Key="Software\Classes\HasherMenu\Shell\sha256\command">
+
+          <RegistryValue
+              Type="string"
+              Value='"[INSTALLFOLDER]Hasher.exe" -h "%1"' />
+
+        </RegistryKey>
+		
+		
+		<RegistryKey
+            Root="HKLM"
+            Key="Software\Classes\HasherMenu\Shell\Vt">
+
+          <RegistryValue
+              Type="string"
+              Name="MUIVerb"
+              Value="Open in VirusTotal" />
+
+        </RegistryKey>
+
+        <RegistryKey
+            Root="HKLM"
+            Key="Software\Classes\HasherMenu\Shell\Vt\command">
+
+          <RegistryValue
+              Type="string"
+              Value='"[INSTALLFOLDER]Hasher.exe" -vt "%1"' />
+
+        </RegistryKey>
+		
+		
+		<RegistryKey
+            Root="HKLM"
+            Key="Software\Classes\HasherMenu\Shell\Sig">
+
+          <RegistryValue
+              Type="string"
+              Name="MUIVerb"
+              Value="Check signature" />
+
+        </RegistryKey>
+
+		
+        <RegistryKey
+            Root="HKLM"
+            Key="Software\Classes\HasherMenu\Shell\Sig\command">
+
+          <RegistryValue
+              Type="string"
+              Value='"[INSTALLFOLDER]Hasher.exe" -s "%1"' />
+
+        </RegistryKey>
+		
+      </Component>
+
+    </ComponentGroup>
+
+  </Fragment>
+
+</Wix>
