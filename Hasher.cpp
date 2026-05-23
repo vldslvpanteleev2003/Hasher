@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <iomanip>
 #include <string>
 #include <fstream>
@@ -74,7 +74,7 @@ void static CheckSignature(const wchar_t* filepath)
     {
         MessageBoxW(NULL, L"Signature VALID", L"Signature", MB_OK);
     }
-    else if (status == TRUST_E_NOSIGNATURE)
+    else if (status == TRUST_E_NOSIGNATURE || status == TRUST_E_SUBJECT_FORM_UNKNOWN || status == TRUST_E_PROVIDER_UNKNOWN)
     {
         MessageBoxW(NULL, L"File is UNSIGNED", L"Signature", MB_OK);
     }
