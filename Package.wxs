@@ -3,7 +3,7 @@
   <Package
       Name="Hasher"
       Manufacturer="V Pan"
-      Version="1.0.0"
+      Version="1.1.0"
       UpgradeCode="12A4ED86-F061-4D9A-9247-28411853DFFD"
       Scope="perMachine"
       InstallerVersion="500">
@@ -69,6 +69,34 @@
 			  
 		</RegistryKey>
 		
+		
+		
+		
+		<RegistryKey
+            Root="HKLM"
+            Key="Software\Classes\HasherMenu\Shell\Sh">
+
+          <RegistryValue
+              Type="string"
+              Name="MUIVerb"
+              Value="Show Hash" />
+
+        </RegistryKey>
+
+		
+        <RegistryKey
+            Root="HKLM"
+            Key="Software\Classes\HasherMenu\Shell\Sh\command">
+
+          <RegistryValue
+              Type="string"
+              Value='"[INSTALLFOLDER]Hasher.exe" -sh "%1"' />
+
+        </RegistryKey>
+		
+		
+		
+		
 		<RegistryKey
             Root="HKLM"
             Key="Software\Classes\HasherMenu\Shell\sha256">
@@ -86,9 +114,12 @@
 
           <RegistryValue
               Type="string"
-              Value='"[INSTALLFOLDER]Hasher.exe" -h "%1"' />
+              Value='"[INSTALLFOLDER]Hasher.exe" -ch "%1"' />
 
         </RegistryKey>
+		
+		
+		
 		
 		
 		<RegistryKey
@@ -113,6 +144,11 @@
         </RegistryKey>
 		
 		
+		
+		
+		
+		
+		
 		<RegistryKey
             Root="HKLM"
             Key="Software\Classes\HasherMenu\Shell\Sig">
@@ -131,9 +167,11 @@
 
           <RegistryValue
               Type="string"
-              Value='"[INSTALLFOLDER]Hasher.exe" -s "%1"' />
+              Value='"[INSTALLFOLDER]Hasher.exe" -sig "%1"' />
 
         </RegistryKey>
+		
+		
 		
       </Component>
 
