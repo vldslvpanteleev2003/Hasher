@@ -1,5 +1,4 @@
-#pragma comment(lib, "wintrust.lib")
-
+﻿#pragma comment(lib, "wintrust.lib")
 #include <windows.h>
 #include <iomanip>
 #include <string>
@@ -9,6 +8,27 @@
 #include <sstream>
 #include <WinTrust.h>
 #include <SoftPub.h>
+#include <iostream>
+#include <array>
+#include "ssdeep.h"
+#include "Hasher.h"
+
+#define chunk_size 65536
+
+static std::vector<uint8_t> get_file_chunk(std::ifstream& file) // вынес чтение в файла в отдельную функцию, которая возвращает чанки
+{
+    std::vector<uint8_t> buffer(chunk_size);
+
+    file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+
+    std::streamsize bytes_read = file.gcount();
+
+    buffer.resize(static_cast<size_t>(bytes_read));
+
+    return buffer;
+}
+
+
 
 static void CopyToClipboard(const std::wstring& text) // копируем в буффер обмена
 {
@@ -43,6 +63,8 @@ static void CopyToClipboard(const std::wstring& text) // копируем в б�
     CloseClipboard();
 }
 
+
+
 static void OpenVirusTotal(const std::wstring& hash) // открываем Браузер по умолчанию с VT
 {
     std::wstring url = L"https://www.virustotal.com/gui/file/" + hash;
@@ -55,6 +77,8 @@ static void OpenVirusTotal(const std::wstring& hash) // открываем Бр�
         exit(1);
     }
 }
+
+
 
 static void CheckSignature(const wchar_t* filepath) // проверка сигнатуры файла, показывает окно с выводом
 {
@@ -95,90 +119,146 @@ static void CheckSignature(const wchar_t* filepath) // проверка сигн
     }
 }
 
-static std::wstring sha256(const wchar_t* filepath) //ключевая функция, рассчитывает sha256
+
+void read_chunks(std::wstring filepath, std::vector<struct HashContext>& Contexts) //функция для чтения чанков, делал, чтобы вычисляло хэш одновременно для всех хэшей, кроме ssdeep без повторного чтения файла
 {
     std::ifstream file(filepath, std::ios::binary);
 
     if (!file)
     {
-        MessageBoxW(NULL, reinterpret_cast<LPCWSTR>(L"Failed to open target file"), reinterpret_cast <LPCWSTR>(L"Error"), MB_DEFBUTTON1);
+        MessageBoxW(NULL, L"Failed to open target file", reinterpret_cast <LPCWSTR>(L"Error"), MB_DEFBUTTON1);
         exit(1);
     }
 
-    BCRYPT_ALG_HANDLE AlgorithmH = NULL;
-    NTSTATUS status = BCryptOpenAlgorithmProvider(&AlgorithmH, BCRYPT_SHA256_ALGORITHM, NULL, 0);
-    if (!BCRYPT_SUCCESS(status))
-    {
-        MessageBoxW(NULL, L"Error to open Alogrithm provider", L"Error", MB_DEFBUTTON1);
-        exit(1);
-    }
-
-    BCRYPT_HASH_HANDLE phHash = NULL;
-    DWORD objectSize = 0;
-    DWORD cbResult = 0;
-
-    status = BCryptGetProperty(AlgorithmH, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&objectSize), sizeof(DWORD), &cbResult, 0);
-    if (!BCRYPT_SUCCESS(status))
-    {
-        MessageBoxW(NULL, L"Error to get property", L"Error", MB_DEFBUTTON1);
-        exit(1);
-    }
-
-    std::vector<UCHAR> hashObject(objectSize);
-
-    status = BCryptCreateHash(AlgorithmH, &phHash, hashObject.data(), hashObject.size(), NULL, 0, 0);
-    if (!BCRYPT_SUCCESS(status))
-    {
-        MessageBoxW(NULL, L"Error to create hash", L"Error", MB_DEFBUTTON1);
-        exit(1);
-    }
-
-    constexpr size_t CHUNK_SIZE = 65536;
-
-    std::vector<uint8_t> buffer(CHUNK_SIZE);
+    std::vector<uint8_t> buffer(chunk_size);
 
     while (file)
     {
         file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
 
-        std::streamsize bytesRead = file.gcount();
-
-        if (bytesRead <= 0)
-            break;
-
-        status = BCryptHashData(phHash, reinterpret_cast<PUCHAR>(buffer.data()), static_cast<ULONG>(bytesRead), 0);
-        if (!BCRYPT_SUCCESS(status))
+        for (auto& Context : Contexts)
         {
-            MessageBoxW(NULL, reinterpret_cast <LPCWSTR>(L"Unsuccessful hashing"), reinterpret_cast <LPCWSTR>(L"Error"), MB_DEFBUTTON1);
+            std::streamsize bytesRead = file.gcount();
+
+            if (bytesRead <= 0)
+                break;
+
+            NTSTATUS status = BCryptHashData(Context.phHash, reinterpret_cast<PUCHAR>(buffer.data()), static_cast<ULONG>(bytesRead), 0);
+            if (!BCRYPT_SUCCESS(status))
+            {
+                MessageBoxW(NULL, reinterpret_cast <LPCWSTR>(L"Unsuccessful hashing"), reinterpret_cast <LPCWSTR>(L"Error"), MB_DEFBUTTON1);
+                exit(1);
+            }
+        }
+    }
+}
+
+
+
+static struct HashResult calculate_hash(const wchar_t* filepath, std::vector<std::wstring> algorithms) //ключевая функция, рассчитывает все хэши, которые указаны в algorithms
+{ 
+    struct HashResult Result;
+    std::vector<struct HashContext> Contexts;
+
+    Contexts.reserve(algorithms.size()); //сразу задаем размер вектора
+
+    for (const auto& algorithm : algorithms)
+    {
+        Contexts.emplace_back(); //создаем пустой обьект в конце вектора
+
+        HashContext& Context = Contexts.back(); //сразу вытягиваем с конца созданный обьект после emplace_back(). Сделал, так потому что при копировании обьекта ломается дальнейшее вычислени хэша
+
+        Context.algo = algorithm;
+
+        Context.AlgorithmH = nullptr;
+
+        Context.status = BCryptOpenAlgorithmProvider(&Context.AlgorithmH, algorithm.c_str(), nullptr, 0);
+
+        if (!BCRYPT_SUCCESS(Context.status))
+        {
+            MessageBoxW(nullptr, L"Error to open Algorithm provider", L"Error", MB_OK);
+            exit(1);
+        }
+
+        Context.phHash = nullptr;
+        Context.objectSize = 0;
+        Context.cbResult = 0;
+
+        Context.status = BCryptGetProperty(Context.AlgorithmH, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&Context.objectSize), sizeof(Context.objectSize), &Context.cbResult, 0);
+
+        if (!BCRYPT_SUCCESS(Context.status))
+        {
+            MessageBoxW(nullptr, L"Error to get property", L"Error", MB_OK);
+            exit(1);
+        }
+
+        Context.hashObject.resize(Context.objectSize);
+
+        Context.status = BCryptCreateHash(Context.AlgorithmH, &Context.phHash, Context.hashObject.data(), static_cast<ULONG>(Context.hashObject.size()), nullptr, 0, 0);
+
+        if (!BCRYPT_SUCCESS(Context.status))
+        {
+            MessageBoxW(nullptr, L"Error to create hash", L"Error", MB_OK);
             exit(1);
         }
     }
 
-    unsigned char hash[32];
+    read_chunks(filepath, Contexts); //получили все нужные данные, теперь отправляем на чтение файла и вычисление хэша для всех указанных алгоритмов
 
-    status = BCryptFinishHash(phHash, hash, sizeof(hash), 0);
-    if (!BCRYPT_SUCCESS(status))
+    for (auto& Context : Contexts) //финализируем вычисления и получаем хэши
     {
-        MessageBoxW(NULL, L"Error to finish hash", L"Error", MB_DEFBUTTON1);
-        exit(1);
+        DWORD hashLength = 0;
+        DWORD cbResult = 0;
+
+        NTSTATUS status = BCryptGetProperty(Context.AlgorithmH, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hashLength), sizeof(hashLength), &cbResult, 0);
+
+        if (!BCRYPT_SUCCESS(status))
+        {
+            MessageBoxW(nullptr, L"Failed to get hash length", L"Error", MB_OK);
+            exit(1);
+        }
+
+        std::vector<UCHAR> hash(hashLength);
+
+        status = BCryptFinishHash(Context.phHash, hash.data(), static_cast<ULONG>(hash.size()), 0);
+        if (!BCRYPT_SUCCESS(status))
+        {
+            MessageBoxW(NULL, L"Error to finish hash", L"Error", MB_DEFBUTTON1);
+            exit(1);
+        }
+
+        std::wstringstream ss;
+
+        for (auto i : hash)
+        {
+            ss << std::hex << std::setw(2) << std::uppercase << std::setfill(L'0') << (int)i;
+        }
+
+        BCryptDestroyHash(Context.phHash);
+        BCryptCloseAlgorithmProvider(Context.AlgorithmH, 0);
+
+        //ничего лучше не придумал чтобы вовзращало именно готовую структуру
+        if (Context.algo == L"MD5")
+        {
+            Result.md5_hash = ss.str();
+        }
+        else if (Context.algo == L"SHA1")
+        {
+            Result.sha1_hash = ss.str();
+        }
+        else if (Context.algo == L"SHA256")
+        {
+            Result.sha256_hash = ss.str();
+        }
     }
-
-    std::wstringstream ss;
-
-    for (auto i : hash)
-    {
-        ss << std::hex << std::setw(2) << std::uppercase << std::setfill(L'0') << (int)i;
-    }
-
-    BCryptDestroyHash(phHash);
-    BCryptCloseAlgorithmProvider(AlgorithmH, 0);
-
-    return ss.str();
+    return Result;
 }
+
+
 
 LRESULT CALLBACK Wndproc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) //callback функция, которая вызывается каждый раз при каком то ивенте, вызывается очень часто
 {
-    std::wstring* data = reinterpret_cast<std::wstring*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA)); // извлекаем данные после SetWindowLongPtrW
+    struct HashResult* hashes = reinterpret_cast<struct HashResult*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA)); // извлекаем данные после SetWindowLongPtrW
 
     switch (uMsg) // фильтруем события
     {
@@ -187,24 +267,114 @@ LRESULT CALLBACK Wndproc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) //c
         {
             CREATESTRUCTW* cs = reinterpret_cast<CREATESTRUCTW*>(lParam); // получаем ссылку на структуру
 
-            std::wstring* data = static_cast<std::wstring*>(cs->lpCreateParams); //вытаскиваем данные из lParam
+            struct HashResult* Hashes = static_cast<struct HashResult*>(cs->lpCreateParams); //вытаскиваем данные из lParam
 
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(data)); // сохраняем данные для нашего hwnd, позволяет получать данные те же данные при последующих ивентах
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(Hashes)); // сохраняем данные для нашего hwnd, позволяет получать данные те же данные при последующих ивентах
 
             return TRUE;
         }
 
         case WM_CREATE: // когда создается основное окно, то создаем остальные
         {
+            CreateWindowExW( //label md5
+                0,
+                L"STATIC",
+                L"MD5:",
+                WS_CHILD | WS_VISIBLE,
+                20, //расположение x
+                33, //расположение y
+                60, //размеры x
+                20, //размеры y
+                hwnd,
+                nullptr,
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
+            CreateWindowExW( //поле с md5
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                hashes->md5_hash.c_str(),
+                WS_CHILD | WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL,
+                85, //расположение x
+                30, //расположение y
+                570, //размеры x
+                25, //размеры y
+                hwnd,
+                nullptr,
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
+            CreateWindowExW( //кнопка copy md5
+                0,
+                L"BUTTON",
+                L"Copy",
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                670, //расположение x
+                30, //расположение y
+                100, //размеры x
+                25, //размеры y
+                hwnd,
+                reinterpret_cast<HMENU>(1001), //идентификатор класса
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
+            CreateWindowExW( //label sha1
+                0,
+                L"STATIC",
+                L"SHA1:",
+                WS_CHILD | WS_VISIBLE,
+                20, //расположение x
+                63, //расположение y
+                60, //размеры x
+                20, //размеры y
+                hwnd,
+                nullptr,
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
+            CreateWindowExW( //поле с sha1
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                hashes->sha1_hash.c_str(),
+                WS_CHILD | WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL,
+                85, //расположение x
+                60, //расположение y
+                570, //размеры x
+                25, //размеры y
+                hwnd,
+                nullptr,
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
+            CreateWindowExW( //кнопка copy sha1
+                0,
+                L"BUTTON",
+                L"Copy",
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                670, //расположение x
+                60, //расположение y
+                100, //размеры x
+                25, //размеры y
+                hwnd,
+                reinterpret_cast<HMENU>(1002), //идентификатор класса
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
             CreateWindowExW( //label sha256
                 0,
                 L"STATIC",
                 L"SHA256:",
                 WS_CHILD | WS_VISIBLE,
-                20,
-                33,
-                60,
-                20,
+                20, //расположение x
+                93, //расположение y
+                60, //размеры x
+                20, //размеры y
                 hwnd,
                 nullptr,
                 GetModuleHandleW(nullptr),
@@ -214,29 +384,74 @@ LRESULT CALLBACK Wndproc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) //c
             CreateWindowExW( //поле с sha256
                 WS_EX_CLIENTEDGE,
                 L"EDIT",
-                data->c_str(),
+                hashes->sha256_hash.c_str(),
                 WS_CHILD | WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL,
-                85,
-                30,
-                570,
-                25,
+                85, //расположение x
+                90, //расположение y
+                570, //размеры x
+                25, //размеры y
                 hwnd,
                 nullptr,
                 GetModuleHandleW(nullptr),
                 nullptr
             );
 
-            CreateWindowExW( //кнопка
+            CreateWindowExW( //кнопка copy sha256
                 0,
                 L"BUTTON",
                 L"Copy",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                670,
-                30,
-                100,
-                25,
+                670, //расположение x
+                90, //расположение y
+                100, //размеры x
+                25, //размеры y
                 hwnd,
-                reinterpret_cast<HMENU>(1001), //идентификатор класса
+                reinterpret_cast<HMENU>(1003), //идентификатор класса
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
+            CreateWindowExW( //label ssdeep
+                0,
+                L"STATIC",
+                L"SSDEEP:",
+                WS_CHILD | WS_VISIBLE,
+                20, //расположение x
+                123, //расположение y
+                60, //размеры x
+                20, //размеры y
+                hwnd,
+                nullptr,
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
+            CreateWindowExW( //поле с ssdeep
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                hashes->ssdeep_hash.c_str(),
+                WS_CHILD | WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL,
+                85, //расположение x
+                120, //расположение y
+                570, //размеры x
+                25, //размеры y
+                hwnd,
+                nullptr,
+                GetModuleHandleW(nullptr),
+                nullptr
+            );
+
+            CreateWindowExW( //кнопка copy ssdeep
+                0,
+                L"BUTTON",
+                L"Copy",
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                670, //расположение x
+                120, //расположение y
+                100, //размеры x
+                25, //размеры y
+                hwnd,
+                reinterpret_cast<HMENU>(1004), //идентификатор класса
                 GetModuleHandleW(nullptr),
                 nullptr
             );
@@ -251,11 +466,36 @@ LRESULT CALLBACK Wndproc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) //c
 
             if (id == 1001 && notification == BN_CLICKED)
             {
-                if (data)
+                if (hashes)
                 {
-                    CopyToClipboard(*data);
+                    CopyToClipboard(hashes->md5_hash);
                 }
             }
+
+            if (id == 1002 && notification == BN_CLICKED)
+            {
+                if (hashes)
+                {
+                    CopyToClipboard(hashes->sha1_hash);
+                }
+            }
+
+            if (id == 1003 && notification == BN_CLICKED)
+            {
+                if (hashes)
+                {
+                    CopyToClipboard(hashes->sha256_hash);
+                }
+            }
+
+            if (id == 1004 && notification == BN_CLICKED)
+            {
+                if (hashes)
+                {
+                    CopyToClipboard(hashes->ssdeep_hash);
+                }
+            }
+
             return 0;
         }
 
@@ -268,13 +508,14 @@ LRESULT CALLBACK Wndproc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) //c
 }
 
 
-static int ShowHash(HINSTANCE hInstance, int nCmdShow, std::wstring hash)
+
+static int ShowHash(HINSTANCE hInstance, int nCmdShow, struct HashResult& hashes)
 {
     int width = 800; //ширина основного окна
-    int height = 150; //высота основного окна
+    int height = 220; //высота основного окна
 
     int screenWidth = GetSystemMetrics(SM_CXSCREEN); // получаем разрешение экрана
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    int screenHeight = GetSystemMetrics(SM_CYSCREEN); // получаем разрешение экрана
 
     int x = (screenWidth - width) / 2; // получаем расположение для окна по центру экрана
     int y = (screenHeight - height) / 2;
@@ -291,10 +532,9 @@ static int ShowHash(HINSTANCE hInstance, int nCmdShow, std::wstring hash)
     wc.lpszClassName = CLASS_NAME;
 
     RegisterClassW(&wc); //регистрируем класс
-
-
+    
     /*
-    Создаем первое окно
+    Создаем первое/главное окно
     */
     HWND hwnd = CreateWindowExW(
         0, // доп. стили окна
@@ -308,7 +548,7 @@ static int ShowHash(HINSTANCE hInstance, int nCmdShow, std::wstring hash)
         nullptr, // HWND - дескриптор родительского окна, тут не нужен ибо сам родительский
         nullptr, // целочисленный id классов, нужен для взаимодействия с конкретным классов при обработке ивентов, пример смотреть выше класс кнопки BUTTON 
         hInstance, // дескриптор модуля EXE
-        &hash // доп. параметры которые можно отправить в callback функцию в параметр LPARAM lParam при создании окна, если дочерний класс учавствует в обработке ивентов, то очень нужный параметр
+        &hashes // доп. параметры которые можно отправить в callback функцию в параметр LPARAM lParam при создании окна, если дочерний класс учавствует в обработке ивентов, то очень нужный параметр
     );
 
     if (!hwnd)
@@ -327,6 +567,8 @@ static int ShowHash(HINSTANCE hInstance, int nCmdShow, std::wstring hash)
     return 0;
 }
 
+
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) // GUI main
 {
     int argc;
@@ -343,13 +585,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     if (mode == L"-ch") //copy hash
     {
-        std::wstring hash = sha256(filepath);
-        CopyToClipboard(hash);
+        std::vector<std::wstring> algorithms{ L"SHA256" };
+        struct HashResult hash = calculate_hash(filepath, algorithms);
+        CopyToClipboard(hash.sha256_hash);
     }
     else if (mode == L"-vt") //virus total
     {
-        std::wstring hash = sha256(filepath);
-        OpenVirusTotal(hash);
+        std::vector<std::wstring> algorithms{ L"SHA256" };
+        struct HashResult hash = calculate_hash(filepath, algorithms);
+        OpenVirusTotal(hash.sha256_hash);
     }
     else if (mode == L"-sig") // signature
     {
@@ -357,8 +601,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     }
     else if (mode == L"-sh") // show hash
     {
-        std::wstring hash = sha256(filepath);
-        ShowHash(hInstance, nCmdShow, hash);
+        std::vector<std::wstring> algorithms{ L"MD5", L"SHA1", L"SHA256"};
+        struct HashResult hashes = calculate_hash(filepath, algorithms);
+        hashes = ssdeep(filepath, hashes);
+        ShowHash(hInstance, nCmdShow, hashes);
     }
     else
     {

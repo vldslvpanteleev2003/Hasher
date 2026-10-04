@@ -3,7 +3,7 @@
   <Package
       Name="Hasher"
       Manufacturer="V Pan"
-      Version="1.1.0"
+      Version="1.2.0"
       UpgradeCode="12A4ED86-F061-4D9A-9247-28411853DFFD"
       Scope="perMachine"
       InstallerVersion="500">
