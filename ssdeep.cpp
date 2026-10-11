@@ -6,9 +6,14 @@
 #include <windows.h>
 #include <vector>
 #include "ssdeep.h"
+#include "HashAlgorithm.h"
 
 #define chunk_size 65536 //размер читаемый чанков из файла
 
+inline void print()
+{
+    std::cout << "Hello motjer puker";
+}
 
 static std::streamsize get_file_size(std::ifstream& file) //выдает размер файла
 {
@@ -35,7 +40,7 @@ static std::vector<uint8_t> get_file_chunk(std::ifstream& file) // чтение 
 
 
 
-struct HashResult ssdeep(const std::wstring& file_path, struct HashResult& hashes)
+void ssdeep(const std::wstring& file_path)
 {
     std::ifstream file(file_path, std::ios::binary);
 
@@ -181,7 +186,5 @@ struct HashResult ssdeep(const std::wstring& file_path, struct HashResult& hashe
 
     std::wstring result = std::to_wstring(block_size).append(L":") + signature1.append(L":") + signature2;
 
-    hashes.ssdeep_hash = result;
-
-    return hashes;
+    HashAlgorithm::m_ssdeep_hash = result;
 }
